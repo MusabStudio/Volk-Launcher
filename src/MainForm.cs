@@ -42,6 +42,7 @@ namespace Volk
         Label _sysLabel;
         bool _busy;
         bool _ready;
+        bool _audioWarned;
 
         public MainForm()
         {
@@ -705,6 +706,30 @@ namespace Volk
                 if (o.PresetLevel > 0) GameFiles.ApplySpeedPreset(o.GameDir, o.PresetLevel);
                 Directory.CreateDirectory(Path.Combine(o.GameDir, "logs"));
 
+                // audio report so a silent game can be diagnosed from the log alone
+                string devs = AudioCheck.Devices();
+                p.Say("Audio devices: " + (string.IsNullOrEmpty(devs) ? "NONE FOUND - Windows has no output device!" : devs));
+                if (string.IsNullOrEmpty(devs) && !_audioWarned)
+                {
+                    _audioWarned = true;
+                    Ui(delegate
+                    {
+                        MessageBox.Show(this,
+                            "Windows reports NO audio output device on this PC.\n\n" +
+                            "That means every game and every video is silent - not just Minecraft.\n\n" +
+                            "Fix: install the sound driver for this PC (Realtek HD Audio, or the laptop/motherboard\n" +
+                            "vendor's audio driver for Windows 8.1). Then the game will have sound.",
+                            "Volk Launcher - no sound device", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    });
+                }
+                int sndHave, sndTotal;
+                AudioCheck.SoundStats(o.GameDir, displayVersion, out sndHave, out sndTotal);
+                if (sndTotal > 0)
+                {
+                    p.Say("Sound files: " + sndHave + "/" + sndTotal + " present");
+                    if (sndHave < sndTotal) p.Say("Some sound files are missing - keep the Sounds box ticked and press PLAY once more");
+                }
+
                 bool boosted = o.PresetLevel > 0;
                 if (boosted) PowerBoost.Enable(AppendLog);
 
@@ -901,12 +926,12 @@ namespace Volk
         {
             string java = JavaFinder.Find(_s);
             string info = string.Format(
-                "Volk Launcher 1.0{0}OS: {1} ({2}-bit){3}CPU: {4} ({5} cores){6}RAM: {7} MB total, {8} MB free{9}GPU: {10} (driver {11}) - {12}{13}Java: {14} ({15}){16}Game dir: {17}",
+                "Volk Launcher 1.0{0}OS: {1} ({2}-bit){3}CPU: {4} ({5} cores){6}RAM: {7} MB total, {8} MB free{9}GPU: {10} (driver {11}) - {12}{13}Audio: {14}{15}Java: {16} ({17}){18}Game dir: {19}",
                 Environment.NewLine, SysInfo.OsName, SysInfo.Is64BitOS ? 64 : 32, Environment.NewLine,
                 SysInfo.CpuName, SysInfo.Cores, Environment.NewLine, SysInfo.TotalRamMb, SysInfo.FreeRamMb,
                 Environment.NewLine, GpuInfo.Name, GpuInfo.Driver, GpuInfo.Verdict(),
-                Environment.NewLine, java ?? "not found", java == null ? "-" : JavaFinder.Describe(java),
-                Environment.NewLine, _s.GameDir);
+                Environment.NewLine, AudioCheck.Devices(), Environment.NewLine, java ?? "not found",
+                java == null ? "-" : JavaFinder.Describe(java), Environment.NewLine, _s.GameDir);
             try { Clipboard.SetText(info); SetStatus(100, "System info copied to clipboard"); } catch { }
         }
     }
@@ -975,6 +1000,8 @@ namespace Volk
         }
     }
 }
+
+
 
 
 

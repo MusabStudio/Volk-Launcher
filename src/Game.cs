@@ -457,6 +457,12 @@ namespace Volk
                 Set(kv, "gamma", "0.5");
                 Set(kv, "anaglyph3d", "false");
 
+                // Audio: only fix sliders that are missing or at zero - never fight the player's mix.
+                SetAudio(kv, "soundCategory_master", "1.0");
+                SetAudio(kv, "soundCategory_voice", "1.0");
+                SetAudio(kv, "soundCategory_player", "1.0");
+                SetAudio(kv, "soundCategory_music", "0.5");
+
                 StringBuilder sb = new StringBuilder();
                 foreach (KeyValuePair<string, string> e in kv) sb.AppendLine(e.Key + ":" + e.Value);
                 File.WriteAllText(opt, sb.ToString());
@@ -466,6 +472,19 @@ namespace Volk
 
         static void Set(Dictionary<string, string> kv, string k, string v)
         {
+            kv[k] = v;
+        }
+
+        /// <summary>Writes a sound slider only when it is missing or set to 0 (a very common "no sound" cause).</summary>
+        static void SetAudio(Dictionary<string, string> kv, string k, string v)
+        {
+            string cur;
+            if (kv.TryGetValue(k, out cur))
+            {
+                float f;
+                if (float.TryParse(cur, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f) && f > 0.001f)
+                    return; // keep the player's value
+            }
             kv[k] = v;
         }
     }
@@ -954,3 +973,72 @@ namespace Volk
     }
 }
 
+
+namespace Volk
+{
+    /// <summary>Audio diagnostics: does Windows have a device, and are the sound files on disk?</summary>
+    public static class AudioCheck
+    {
+        public static string Devices()
+        {
+            try
+            {
+                using (System.Management.ManagementObjectSearcher s =
+                    new System.Management.ManagementObjectSearcher("SELECT Name, Status FROM Win32_SoundDevice"))
+                {
+                    System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                    foreach (System.Management.ManagementObject o in s.Get())
+                    {
+                        string n = o["Name"] as string;
+                        if (string.IsNullOrEmpty(n)) continue;
+                        if (sb.Length > 0) sb.Append(" | ");
+                        sb.Append(n.Trim());
+                    }
+                    return sb.Length == 0 ? "" : sb.ToString();
+                }
+            }
+            catch { return null; }
+        }
+
+        public static void SoundStats(string gameDir, string versionId, out int have, out int total)
+        {
+            have = 0; total = 0;
+            try
+            {
+                string indexId = null;
+                string cur = versionId;
+                for (int depth = 0; depth < 6 && indexId == null; depth++)
+                {
+                    string path = Versions.JsonPath(gameDir, cur);
+                    if (!File.Exists(path)) break;
+                    Dictionary<string, object> vj = Json.Parse(File.ReadAllText(path));
+                    Dictionary<string, object> ai = Json.ObjAt(vj, "assetIndex");
+                    if (ai != null) indexId = Json.Str(ai, "id");
+                    if (indexId == null) indexId = Json.Str(vj, "assets");
+                    if (indexId == null) cur = Json.Str(vj, "inheritsFrom");
+                    if (string.IsNullOrEmpty(cur)) break;
+                }
+                if (string.IsNullOrEmpty(indexId)) return;
+
+                string indexPath = Path.Combine(gameDir, "assets", "indexes", indexId + ".json");
+                if (!File.Exists(indexPath)) return;
+
+                Dictionary<string, object> index = Json.Parse(File.ReadAllText(indexPath));
+                Dictionary<string, object> objects = Json.ObjAt(index, "objects");
+                if (objects == null) return;
+
+                foreach (KeyValuePair<string, object> kv in objects)
+                {
+                    if (!kv.Key.StartsWith("minecraft/sounds/", StringComparison.OrdinalIgnoreCase)) continue;
+                    total++;
+                    Dictionary<string, object> e = Json.Obj(kv.Value);
+                    string hash = e == null ? null : Json.Str(e, "hash");
+                    if (string.IsNullOrEmpty(hash)) continue;
+                    string file = Path.Combine(gameDir, "assets", "objects", hash.Substring(0, 2), hash);
+                    if (File.Exists(file)) have++;
+                }
+            }
+            catch { }
+        }
+    }
+}
