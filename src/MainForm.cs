@@ -624,14 +624,12 @@ namespace Volk
                 {
                     p.Say("Found " + userMods.Count + " mod(s) in the mods folder");
                     ModScanner.Report(userMods, displayVersion, AppendLog);
-                    if (o.FastMods)
-                    {
-                        ModScanner.PrepareFor(o.GameDir, displayVersion, AppendLog);
-                    }
-                    else
-                    {
-                        p.Say("Fast mods is off - mods folder left exactly as it is (nothing moved, nothing added)");
-                    }
+
+                    // Always quarantine jars that cannot load on this version - otherwise Fabric
+                    // refuses to start at all. Nothing is deleted, and they come back automatically.
+                    ModScanner.PrepareFor(o.GameDir, displayVersion, AppendLog);
+                    if (!o.FastMods)
+                        p.Say("Fast mods is off - no mods added, your own mods are used as they are");
                 }
 
                 bool needFabric = IsModern(o.VersionId) && (o.FastMods || userMods.Count > 0);

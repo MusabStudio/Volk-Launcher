@@ -147,8 +147,9 @@ Drop jars into `%APPDATA%\.minecraft\mods`. Rules:
 * **Fast mods ON** = performance pack: launches through Fabric, installs Sodium/Lithium/FerriteCore/
   ImmediatelyFast/Krypton/Fabric API if they are missing, and stashes jars that declare a different
   Minecraft version in `mods.disabled` (they are moved back automatically when you launch their version).
-* **Fast mods OFF** = hands off. Nothing is moved, nothing is added, nothing is deleted. The version
-  still launches through Fabric so your own mods load. Use this on your own PC.
+* **Fast mods OFF** = no additions. Your own mods are used exactly as they are, but jars that
+  *cannot* load on the selected version (Fabric would refuse to start) are still moved to
+  `mods.disabled` and restored automatically later. Nothing is ever deleted.
 
 ## Limits (read this)
 
@@ -211,3 +212,4 @@ src\MainForm.cs    WinForms UI (dark theme, custom-drawn controls)
 src\Core.cs        settings, system info, HTTP, JSON, Java discovery
 src\Game.cs        version resolve, downloads, natives, launch, presets
 ```
+
