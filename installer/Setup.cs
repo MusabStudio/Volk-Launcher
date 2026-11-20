@@ -67,18 +67,28 @@ namespace Volk
             if (j21 != null && log != null) log("Java 21 -> " + j21);
             if (j8 != null && log != null) log("Java 8  -> " + j8);
 
-            // 3. settings tuned for a weak PC
+            // 3. settings: create the easy defaults only on a fresh install, never overwrite
+            //    a configuration the user already tuned
+            bool fresh = !File.Exists(Paths.ConfigFile);
             Settings st = Settings.Load();
-            st.Username = string.IsNullOrEmpty(nickname) ? "Player" : nickname;
-            st.VersionId = "1.21.11";
-            st.RamMb = st.RamMb > 2048 ? 1536 : st.RamMb;
-            st.PresetLevel = 2;
-            st.FastMods = true;
-            st.Width = 640;
-            st.Height = 360;
-            st.JavaPath = "";
+            if (fresh)
+            {
+                st.Username = string.IsNullOrEmpty(nickname) ? "Player" : nickname;
+                st.VersionId = "1.21.11";
+                st.RamMb = st.RamMb > 2048 ? 1536 : st.RamMb;
+                st.PresetLevel = 2;
+                st.FastMods = true;
+                st.DownloadSounds = true;
+                st.Width = 640;
+                st.Height = 360;
+                st.JavaPath = "";
+                if (log != null) log("First install - settings written (1.21.11, Potato, 640x360)");
+            }
+            else if (log != null)
+            {
+                log("Existing settings kept (version " + st.VersionId + ", " + st.RamMb + " MB)");
+            }
             st.Save();
-            if (log != null) log("Settings written (1.21.11, Potato, 640x360)");
 
             // 4. shortcuts
             try
