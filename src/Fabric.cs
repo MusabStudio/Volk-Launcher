@@ -217,6 +217,7 @@ namespace Volk
             public string Version;
             public string Loader;      // "fabric" or "forge"
             public string NeedsMc;     // declared minecraft dependency, if any
+            public bool IntermediaryTweaker; // class tweaker for obfuscated (<= 1.21.x) Minecraft
         }
 
         public static List<Mod> Scan(string gameDir)
@@ -262,10 +263,13 @@ namespace Volk
                 }
 
                 // 2. take out mods for other versions (kept, not deleted)
+                bool unobfuscated = IsUnobfuscated(mcVersion);
                 foreach (string jar in Directory.GetFiles(modsDir, "*.jar"))
                 {
                     Mod m = Read(jar);
-                    if (string.IsNullOrEmpty(m.NeedsMc) || Compatible(m.NeedsMc, mcVersion)) continue;
+                    bool wrongVersion = !string.IsNullOrEmpty(m.NeedsMc) && !Compatible(m.NeedsMc, mcVersion);
+                    bool wrongMapping = unobfuscated && m.IntermediaryTweaker;
+                    if (!wrongVersion && !wrongMapping) continue;
                     try
                     {
                         Directory.CreateDirectory(disabled);
@@ -273,7 +277,10 @@ namespace Volk
                         if (File.Exists(dest)) File.Delete(dest);
                         File.Move(jar, dest);
                         moved++;
-                        if (log != null) log("stashed for later: " + m.Name + " (needs " + m.NeedsMc + ")");
+                        if (log != null)
+                            log("stashed for later: " + m.Name + (wrongMapping
+                                ? " (built for obfuscated Minecraft, " + mcVersion + " is unobfuscated)"
+                                : " (needs " + m.NeedsMc + ")"));
                     }
                     catch { }
                 }
@@ -330,6 +337,26 @@ namespace Volk
                     else if (zip.GetEntry("META-INF/MANIFEST.MF") != null)
                     {
                         m.Loader = "old";
+                    }
+
+                    // 26.x ships unobfuscated; a class tweaker written for "intermediary" cannot be applied.
+                    foreach (System.IO.Compression.ZipArchiveEntry entry in zip.Entries)
+                    {
+                        if (!entry.Name.EndsWith(".classtweaker", StringComparison.OrdinalIgnoreCase) &&
+                            !entry.Name.EndsWith(".accesswidener", StringComparison.OrdinalIgnoreCase)) continue;
+                        try
+                        {
+                            using (System.IO.StreamReader sr = new System.IO.StreamReader(entry.Open()))
+                            {
+                                char[] buf = new char[200];
+                                int n = sr.Read(buf, 0, buf.Length);
+                                string head = new string(buf, 0, n);
+                                if (head.IndexOf("intermediary", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    m.IntermediaryTweaker = true;
+                            }
+                        }
+                        catch { }
+                        if (m.IntermediaryTweaker) break;
                     }
                 }
             }
@@ -440,6 +467,14 @@ namespace Volk
                 nums.Add(n);
             }
             return nums.Count > 0 ? nums.ToArray() : null;
+        }
+
+        /// <summary>26.x+ ships unobfuscated (official names) - no intermediary class tweakers.</summary>
+        static bool IsUnobfuscated(string mcVersion)
+        {
+            int[] v = ParseVersion(mcVersion);
+            if (v == null || v.Length == 0) return false;
+            return v[0] > 1; // 26.3, 27.x ...
         }
 
         static string MajorMinor(string v)
