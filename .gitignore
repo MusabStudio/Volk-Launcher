@@ -1,0 +1,13 @@
+# build output (huge, shipped through Releases instead)
+dist/
+*.exe
+*.zip
+
+# Java runtimes used to build the offline packages (~85 MB)
+assets/
+
+# scratch
+test/
+*.png
+*.log
+VolkLauncher-win8/
