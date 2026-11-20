@@ -41,6 +41,7 @@ namespace Volk
         TextBox _log;
         Label _sysLabel;
         bool _busy;
+        bool _ready;
 
         public MainForm()
         {
@@ -51,6 +52,41 @@ namespace Volk
             RefreshJavaLabel();
             ShowSystemInfo();
             CheckBrokenDlls();
+
+            _ready = true;
+            FormClosing += delegate { SaveCurrent(); };
+
+            // warm the Java cache in the background so the first click does not freeze the PC
+            Thread warm = new Thread(delegate ()
+            {
+                try
+                {
+                    List<string> all = JavaFinder.FindAll(_s);
+                    foreach (string j in all) JavaFinder.MajorVersion(j);
+                    Ui(delegate { RefreshJavaLabel(); ShowSystemInfo(); });
+                }
+                catch { }
+            });
+            warm.IsBackground = true;
+            warm.Start();
+        }
+
+        void SaveCurrent()
+        {
+            if (!_ready) return;
+            try
+            {
+                _s.Username = Sanitize(_user.Text);
+                _s.VersionId = (_version.SelectedItem as string) ?? _s.VersionId;
+                _s.PresetLevel = _presetCombo.SelectedIndex == 0 ? 2 : (_presetCombo.SelectedIndex == 1 ? 1 : 0);
+                _s.FastMods = _fastMods.Checked;
+                _s.DownloadSounds = _sounds.Checked;
+                if (_sizeCombo.SelectedIndex == 0) { _s.Width = 640; _s.Height = 360; }
+                else if (_sizeCombo.SelectedIndex == 2) { _s.Width = 1280; _s.Height = 720; }
+                else { _s.Width = 854; _s.Height = 480; }
+                _s.Save();
+            }
+            catch { }
         }
 
         void CheckBrokenDlls()
@@ -146,7 +182,7 @@ namespace Volk
             _version.Items.AddRange(new object[] { "1.8.9", "1.12.2", "1.7.10", "1.16.5", "1.21.8", "26.3" });
             _version.SelectedItem = _s.VersionId;
             if (_version.SelectedIndex < 0) _version.SelectedIndex = 0;
-            _version.SelectedIndexChanged += delegate { RefreshJavaLabel(); };
+            _version.SelectedIndexChanged += delegate { RefreshJavaLabel(); SaveCurrent(); };
             grid.Controls.Add(_version, 1, 1);
 
             grid.Controls.Add(MakeLabel("Memory"), 0, 2);
@@ -187,8 +223,10 @@ namespace Volk
             _presetCombo.Width = 190;
             _presetCombo.Items.AddRange(new object[] { "Potato (2 chunks, max FPS)", "Smooth (4 chunks)", "Off (my settings)" });
             _presetCombo.SelectedIndex = _s.PresetLevel >= 2 ? 0 : (_s.PresetLevel == 1 ? 1 : 2);
-            _sounds = MakeCheck("Download sounds (+150 MB)", _s.DownloadSounds);
+            _presetCombo.SelectedIndexChanged += delegate { SaveCurrent(); };
+            _sounds = MakeCheck("Sounds (audio)", _s.DownloadSounds);
             _sounds.Location = new Point(206, 8);
+            _sounds.CheckedChanged += delegate { SaveCurrent(); };
             _sounds.AutoSize = true;
             _sizeCombo = new ComboBox();
             _sizeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -199,6 +237,7 @@ namespace Volk
             _sizeCombo.Width = 140;
             _sizeCombo.Items.AddRange(new object[] { "640x360 (fastest)", "854x480", "1280x720" });
             _sizeCombo.SelectedIndex = _s.Width <= 640 ? 0 : (_s.Width <= 900 ? 1 : 2);
+            _sizeCombo.SelectedIndexChanged += delegate { SaveCurrent(); };
 
             opts.Controls.Add(_presetCombo);
             opts.Controls.Add(_sounds);
@@ -206,6 +245,7 @@ namespace Volk
 
             _fastMods = MakeCheck("Fast mods", _s.FastMods);
             _fastMods.Location = new Point(552, 8);
+            _fastMods.CheckedChanged += delegate { SaveCurrent(); };
             _fastMods.AutoSize = true;
             opts.Controls.Add(_fastMods);
             grid.Controls.Add(opts, 1, 3);
@@ -619,6 +659,12 @@ namespace Volk
                 p.Step(-1, "Checking files...");
                 string displayVersion = o.VersionId;
 
+                if (SysInfo.FreeRamMb < 900)
+                    p.Say("WARNING: only " + SysInfo.FreeRamMb + " MB RAM free - close Chrome/browser or the game will stutter");
+
+                string soundsMarker = Path.Combine(Paths.Root, "sounds-" + displayVersion + ".txt");
+                bool soundsMissing = o.DownloadSounds && !File.Exists(soundsMarker);
+
                 List<ModScanner.Mod> userMods = ModScanner.Scan(o.GameDir);
                 if (userMods.Count > 0)
                 {
@@ -645,10 +691,15 @@ namespace Volk
                     GameFiles.Install(o, p);
                     if (o.FastMods) Fabric.InstallMods(o.GameDir, displayVersion, AppendLog);
                 }
-                else if (GameFiles.NeedsInstall(o.GameDir, o.VersionId))
+                else if (GameFiles.NeedsInstall(o.GameDir, o.VersionId) || soundsMissing)
                 {
-                    p.Say("Installing " + o.VersionId + " files...");
+                    p.Say(soundsMissing ? "Downloading sounds so the game has audio..." : "Installing " + o.VersionId + " files...");
                     GameFiles.Install(o, p);
+                }
+
+                if (o.DownloadSounds)
+                {
+                    try { File.WriteAllText(soundsMarker, DateTime.Now.ToString("s")); } catch { }
                 }
 
                 if (o.PresetLevel > 0) GameFiles.ApplySpeedPreset(o.GameDir, o.PresetLevel);
@@ -924,6 +975,9 @@ namespace Volk
         }
     }
 }
+
+
+
 
 
 

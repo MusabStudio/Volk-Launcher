@@ -171,6 +171,19 @@ Drop jars into `%APPDATA%\.minecraft\mods`. Rules:
 %APPDATA%\.minecraft\                 game folder (worlds, options.txt, logs\volk-latest.log)
 ```
 
+## Settings are remembered
+
+Every change (version, preset, window size, sounds, Fast mods, nickname) is written to
+`%APPDATA%\.volk\config.txt` immediately and again on close - you do not have to press PLAY first.
+Java detection is cached and warmed in the background, so opening the launcher no longer freezes
+the PC (that freeze came from scanning for Java and starting `java -version` on the UI thread).
+
+## No sound?
+
+Sounds are downloaded by default now. If a game is still silent, press PLAY once with **Sounds**
+ticked: it fetches the missing sound files (a few hundred MB) and writes a marker, so it only
+happens once. Also check the Windows mixer and the output device.
+
 ## Troubleshooting
 
 | Symptom | Fix |

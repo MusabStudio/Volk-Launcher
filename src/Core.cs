@@ -60,7 +60,7 @@ namespace Volk
         public string JavaPath = "";
         public int RamMb = -1;   // -1 = auto (half of installed RAM, capped)
         public int PresetLevel = -1; // -1 = auto, 0 off, 1 smooth, 2 potato
-        public bool DownloadSounds = false;
+        public bool DownloadSounds = true;
         public string HorizonPath = "";
         public bool FastMods = true;
         public int Width = 0;    // 0 = auto
@@ -100,8 +100,20 @@ namespace Volk
             catch (Exception ex) { Log.Write("Settings.Load: " + ex.Message); }
             if (string.IsNullOrEmpty(s.GameDir)) s.GameDir = Paths.DefaultGameDir;
 
-            // Auto defaults: a 4 GB laptop must not get a 32 GB desktop's settings, and vice versa.
-            if (s.RamMb <= 0) s.RamMb = SysInfo.RecommendedRam();
+            // One-time migration: older builds defaulted sounds off, which makes the game silent.
+            try
+            {
+                string marker = Path.Combine(Paths.Root, "sounds-on.marker");
+                if (!File.Exists(marker))
+                {
+                    s.DownloadSounds = true;
+                    Directory.CreateDirectory(Paths.Root);
+                    File.WriteAllText(marker, "1");
+                }
+            }
+            catch { }
+
+            // Auto defaults: a 4 GB laptop must not get a 32 GB desktop's settings, and vice versa.            if (s.RamMb <= 0) s.RamMb = SysInfo.RecommendedRam();
             if (s.PresetLevel < 0) s.PresetLevel = SysInfo.TotalRamMb >= 8192 ? 1 : 2;
             if (s.Width <= 0 || s.Height <= 0)
             {
@@ -404,6 +416,22 @@ namespace Volk
 
         public static List<string> FindAll(Settings s)
         {
+            lock (CacheGate)
+            {
+                if (_allCache != null && (DateTime.UtcNow - _allCacheTime).TotalSeconds < 30)
+                    return new List<string>(_allCache);
+            }
+            List<string> result = FindAllUncached(s);
+            lock (CacheGate)
+            {
+                _allCache = new List<string>(result);
+                _allCacheTime = DateTime.UtcNow;
+            }
+            return result;
+        }
+
+        static List<string> FindAllUncached(Settings s)
+        {
             List<string> candidates = new List<string>();
 
             if (!string.IsNullOrEmpty(s.JavaPath) && File.Exists(s.JavaPath)) candidates.Add(s.JavaPath);
@@ -580,9 +608,39 @@ namespace Volk
             return null;
         }
 
+        // Caching matters: every Describe() starts a java process, and this runs on the UI thread.
+        static readonly Dictionary<string, string> DescCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        static readonly Dictionary<string, int> MajorCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        static readonly object CacheGate = new object();
+        static List<string> _allCache;
+        static DateTime _allCacheTime = DateTime.MinValue;
+
+        public static void Invalidate()
+        {
+            lock (CacheGate)
+            {
+                DescCache.Clear();
+                MajorCache.Clear();
+                _allCache = null;
+                _allCacheTime = DateTime.MinValue;
+            }
+        }
+
         public static string Describe(string javawPath)
         {
             if (string.IsNullOrEmpty(javawPath)) return "not found";
+            lock (CacheGate)
+            {
+                string cached;
+                if (DescCache.TryGetValue(javawPath, out cached)) return cached;
+            }
+            string result = DescribeUncached(javawPath);
+            lock (CacheGate) { DescCache[javawPath] = result; }
+            return result;
+        }
+
+        static string DescribeUncached(string javawPath)
+        {
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo(javawPath.Replace("javaw.exe", "java.exe"), "-version");
@@ -608,6 +666,19 @@ namespace Volk
         }
 
         public static int MajorVersion(string javawPath)
+        {
+            if (string.IsNullOrEmpty(javawPath)) return 8;
+            lock (CacheGate)
+            {
+                int cached;
+                if (MajorCache.TryGetValue(javawPath, out cached)) return cached;
+            }
+            int value = MajorVersionUncached(javawPath);
+            lock (CacheGate) { MajorCache[javawPath] = value; }
+            return value;
+        }
+
+        static int MajorVersionUncached(string javawPath)
         {
             string d = Describe(javawPath);
             if (string.IsNullOrEmpty(d)) return 8;
@@ -704,5 +775,7 @@ namespace Volk
         }
     }
 }
+
+
 
 

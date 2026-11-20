@@ -105,6 +105,7 @@ namespace Volk
                 o.Width = 640;
                 o.Height = 360;
                 o.JavawPath = j21;
+                o.DownloadSounds = true;
 
                 Progress p = new Progress();
                 p.Status = status;
@@ -338,3 +339,4 @@ namespace Volk
         }
     }
 }
+

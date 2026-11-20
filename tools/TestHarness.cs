@@ -17,7 +17,7 @@ class TestMain
         o.GameDir = Path.Combine(Paths.Root, "testgame");
         o.RamMb = 1536;
         o.DownloadSounds = false;
-        o.SpeedPreset = true;
+        o.PresetLevel = 1;
         o.Width = 854;
         o.Height = 480;
 
@@ -38,7 +38,7 @@ class TestMain
 
             Console.WriteLine("NeedsInstall = " + GameFiles.NeedsInstall(o.GameDir, version));
             GameFiles.Install(o, p);
-            GameFiles.ApplySpeedPreset(o.GameDir);
+            GameFiles.ApplySpeedPreset(o.GameDir, 1);
             Console.WriteLine("INSTALL OK");
 
             if (installOnly) { Console.WriteLine("install-only done"); return; }
@@ -62,3 +62,4 @@ class TestMain
         }
     }
 }
+
