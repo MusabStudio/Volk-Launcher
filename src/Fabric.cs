@@ -45,6 +45,15 @@ namespace Volk
         /// <summary>Creates versions/fabric-loader-X-Y/fabric-loader-X-Y.json and returns the id.</summary>
         public static string EnsureProfile(string gameDir, string mc, Progress p)
         {
+            // Reuse a Fabric profile that other launchers already installed for this version
+            // (it may use a loader build that this Minecraft version actually supports).
+            string found = FindExisting(gameDir, mc);
+            if (found != null)
+            {
+                if (p != null) p.Say("Using existing Fabric profile: " + found);
+                return found;
+            }
+
             string loader = LoaderVersion();
             string id = "fabric-loader-" + loader + "-" + mc;
             string dir = Versions.VersionDir(gameDir, id);
@@ -141,6 +150,39 @@ namespace Volk
             return false;
         }
 
+        static string FindExisting(string gameDir, string mc)
+        {
+            try
+            {
+                string versions = Path.Combine(gameDir, "versions");
+                if (!Directory.Exists(versions)) return null;
+
+                string bestId = null;
+                DateTime bestTime = DateTime.MinValue;
+
+                foreach (string dir in Directory.GetDirectories(versions))
+                {
+                    string id = Path.GetFileName(dir);
+                    string json = Path.Combine(dir, id + ".json");
+                    if (!File.Exists(json)) continue;
+                    try
+                    {
+                        Dictionary<string, object> root = Json.Parse(File.ReadAllText(json));
+                        string parent = Json.Str(root, "inheritsFrom");
+                        string main = Json.Str(root, "mainClass");
+                        if (parent != mc) continue;
+                        if (main == null || main.IndexOf("fabric", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                        DateTime t = File.GetLastWriteTimeUtc(json);
+                        if (t > bestTime) { bestTime = t; bestId = id; }
+                    }
+                    catch { }
+                }
+                return bestId;
+            }
+            catch { return null; }
+        }
+
         public static void ClearMods(string gameDir, Action<string> log)
         {
             try
@@ -193,17 +235,37 @@ namespace Volk
         /// <summary>Moves jars that declare a different Minecraft major.minor out of mods/, so they cannot crash the launch.</summary>
         public static int PrepareFor(string gameDir, string mcVersion, Action<string> log)
         {
-            int moved = 0;
+            int moved = 0, restored = 0;
             try
             {
                 string modsDir = Path.Combine(gameDir, "mods");
-                if (!Directory.Exists(modsDir)) return 0;
                 string disabled = Path.Combine(gameDir, "mods.disabled");
+                if (!Directory.Exists(modsDir)) Directory.CreateDirectory(modsDir);
+
+                // 1. bring back mods that belong to the version we are launching now
+                if (Directory.Exists(disabled))
+                {
+                    foreach (string jar in Directory.GetFiles(disabled, "*.jar"))
+                    {
+                        Mod m = Read(jar);
+                        if (string.IsNullOrEmpty(m.NeedsMc) || !Compatible(m.NeedsMc, mcVersion)) continue;
+                        try
+                        {
+                            string dest = Path.Combine(modsDir, Path.GetFileName(jar));
+                            if (File.Exists(dest)) File.Delete(dest);
+                            File.Move(jar, dest);
+                            restored++;
+                            if (log != null) log("restored: " + m.Name + " (" + m.NeedsMc + ")");
+                        }
+                        catch { }
+                    }
+                }
+
+                // 2. take out mods for other versions (kept, not deleted)
                 foreach (string jar in Directory.GetFiles(modsDir, "*.jar"))
                 {
                     Mod m = Read(jar);
-                    if (string.IsNullOrEmpty(m.NeedsMc)) continue;
-                    if (Compatible(m.NeedsMc, mcVersion)) continue;
+                    if (string.IsNullOrEmpty(m.NeedsMc) || Compatible(m.NeedsMc, mcVersion)) continue;
                     try
                     {
                         Directory.CreateDirectory(disabled);
@@ -211,12 +273,14 @@ namespace Volk
                         if (File.Exists(dest)) File.Delete(dest);
                         File.Move(jar, dest);
                         moved++;
-                        if (log != null) log("moved to mods.disabled: " + m.Name + " (needs " + m.NeedsMc + ")");
+                        if (log != null) log("stashed for later: " + m.Name + " (needs " + m.NeedsMc + ")");
                     }
                     catch { }
                 }
+
+                if (restored > 0 && log != null) log(restored + " mod(s) restored for " + mcVersion);
                 if (moved > 0 && log != null)
-                    log(moved + " mod(s) for another Minecraft version moved to " + disabled);
+                    log(moved + " mod(s) for another Minecraft version stashed in " + disabled + " (they come back automatically)");
             }
             catch { }
             return moved;
@@ -273,25 +337,115 @@ namespace Volk
             return m;
         }
 
-        /// <summary>Compares only the major.minor ("1.21.11" and "&gt;=1.21 &lt;1.22" are compatible).</summary>
+        /// <summary>Compares Fabric-style ranges (">=26.1 &lt;27", "~26.3", "1.21.11", "*") with a version.</summary>
         public static bool Compatible(string need, string mcVersion)
         {
             if (string.IsNullOrEmpty(need)) return true;
             need = need.Trim();
-            if (need == "*") return true;
-            string mcKey = MajorMinor(mcVersion);
-            if (string.IsNullOrEmpty(mcKey)) return true;
-            foreach (string tok in need.Split(new char[] { ' ', ',', '|' }, StringSplitOptions.RemoveEmptyEntries))
+            if (need == "*" || need.Length == 0) return true;
+
+            int[] v = ParseVersion(mcVersion);
+            if (v == null) return true;
+
+            foreach (string group in need.Split(new string[] { "||" }, StringSplitOptions.None))
             {
-                if (MajorMinor(tok) == mcKey) return true;
+                if (EvalGroup(group, v)) return true;
             }
             return false;
+        }
+
+        static bool EvalGroup(string group, int[] v)
+        {
+            bool any = false;
+            foreach (string raw in group.Split(new char[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (raw == "*") continue;
+                any = true;
+                if (!EvalClause(raw, v)) return false;
+            }
+            return any;
+        }
+
+        static bool EvalClause(string token, int[] v)
+        {
+            string t = token.Trim();
+            while (t.EndsWith("-")) t = t.Substring(0, t.Length - 1); // fabric pre-release marker
+
+            string op = "";
+            foreach (string candidate in new string[] { ">=", "<=", "==", ">", "<", "~", "^", "=" })
+            {
+                if (t.StartsWith(candidate)) { op = candidate; t = t.Substring(candidate.Length).Trim(); break; }
+            }
+
+            int[] need = ParseVersion(t);
+            if (need == null) return true; // unknown syntax: do not block
+
+            int cmp = Compare(v, need);
+            switch (op)
+            {
+                case ">=": return cmp >= 0;
+                case "<=": return cmp <= 0;
+                case ">": return cmp > 0;
+                case "<": return cmp < 0;
+                case "=":
+                case "==": return cmp == 0;
+                case "~":
+                {
+                    if (cmp < 0) return false;
+                    int[] upper = (int[])need.Clone();
+                    int bump = upper.Length >= 2 ? upper.Length - 1 : 0; // ~26.3 -> <26.4, ~1.21.11 -> <1.21.12
+                    upper[bump] = upper[bump] + 1;
+                    for (int i = bump + 1; i < upper.Length; i++) upper[i] = 0;
+                    return Compare(v, upper) < 0;
+                }
+                case "^":
+                {
+                    if (cmp < 0) return false;
+                    int[] upper = (int[])need.Clone();
+                    upper[0] = upper[0] + 1;
+                    for (int i = 1; i < upper.Length; i++) upper[i] = 0;
+                    return Compare(v, upper) < 0;
+                }
+                default:
+                {
+                    // plain "1.21.11" / "26.3": component prefix match
+                    if (v.Length < need.Length) return false;
+                    for (int i = 0; i < need.Length; i++) if (v[i] != need[i]) return false;
+                    return true;
+                }
+            }
+        }
+
+        static int Compare(int[] a, int[] b)
+        {
+            int n = Math.Max(a.Length, b.Length);
+            for (int i = 0; i < n; i++)
+            {
+                int x = i < a.Length ? a[i] : 0;
+                int y = i < b.Length ? b[i] : 0;
+                if (x != y) return x < y ? -1 : 1;
+            }
+            return 0;
+        }
+
+        static int[] ParseVersion(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            string[] parts = s.Split('.');
+            List<int> nums = new List<int>();
+            foreach (string p in parts)
+            {
+                int n;
+                if (!int.TryParse(p, out n)) break;
+                nums.Add(n);
+            }
+            return nums.Count > 0 ? nums.ToArray() : null;
         }
 
         static string MajorMinor(string v)
         {
             System.Text.RegularExpressions.Match m =
-                System.Text.RegularExpressions.Regex.Match(v, @"\d+\.\d+");
+                System.Text.RegularExpressions.Regex.Match(v ?? "", @"\d+\.\d+");
             return m.Success ? m.Value : null;
         }
 
@@ -316,6 +470,25 @@ namespace Volk
 
             if (log != null)
                 log("Mods folder: " + mods.Count + " jar(s) - " + fabric + " Fabric, " + forge + " Forge, " + other + " unknown");
+
+            // Tell the user clearly when the folder was built for another version.
+            Dictionary<string, int> byVersion = new Dictionary<string, int>();
+            foreach (Mod m in mods)
+            {
+                string k = MajorMinor(m.NeedsMc);
+                if (string.IsNullOrEmpty(k)) continue;
+                if (!byVersion.ContainsKey(k)) byVersion[k] = 0;
+                byVersion[k]++;
+            }
+            string mcKey = MajorMinor(mcVersion);
+            int best = 0;
+            string bestKey = null;
+            foreach (KeyValuePair<string, int> kv in byVersion)
+            {
+                if (kv.Value > best) { best = kv.Value; bestKey = kv.Key; }
+            }
+            if (bestKey != null && mcKey != null && bestKey != mcKey && log != null)
+                log("hint: " + best + " mod(s) in mods/ are for Minecraft " + bestKey + " - select version " + bestKey + " in the dropdown to play with them");
 
             if (forge > 0 && mcVersion.IndexOf("1.1", StringComparison.Ordinal) == 0 && mcVersion != "1.12.2")
             {

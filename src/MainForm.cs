@@ -204,7 +204,7 @@ namespace Volk
             opts.Controls.Add(_sounds);
             opts.Controls.Add(_sizeCombo);
 
-            _fastMods = MakeCheck("Sodium", _s.FastMods);
+            _fastMods = MakeCheck("Fast mods", _s.FastMods);
             _fastMods.Location = new Point(552, 8);
             _fastMods.AutoSize = true;
             opts.Controls.Add(_fastMods);
@@ -624,7 +624,14 @@ namespace Volk
                 {
                     p.Say("Found " + userMods.Count + " mod(s) in the mods folder");
                     ModScanner.Report(userMods, displayVersion, AppendLog);
-                    ModScanner.PrepareFor(o.GameDir, displayVersion, AppendLog);
+                    if (o.FastMods)
+                    {
+                        ModScanner.PrepareFor(o.GameDir, displayVersion, AppendLog);
+                    }
+                    else
+                    {
+                        p.Say("Fast mods is off - mods folder left exactly as it is (nothing moved, nothing added)");
+                    }
                 }
 
                 bool needFabric = IsModern(o.VersionId) && (o.FastMods || userMods.Count > 0);
@@ -919,6 +926,7 @@ namespace Volk
         }
     }
 }
+
 
 
 

@@ -144,11 +144,11 @@ Silent mode: `VolkSetup.exe /quiet [/preload]`
 
 Drop jars into `%APPDATA%\.minecraft\mods`. Rules:
 
-* If the folder has mods, that version is launched through **Fabric** automatically.
-* Mods declaring a different `major.minor` (a 26.3 mod while launching 1.21.11) are moved to
-  `mods.disabled` before launch, with a log line each - that is what prevents "it crashes on startup".
-  Put them back when switching back to 26.3.
-* Mods already present are kept; only missing performance mods are downloaded.
+* **Fast mods ON** = performance pack: launches through Fabric, installs Sodium/Lithium/FerriteCore/
+  ImmediatelyFast/Krypton/Fabric API if they are missing, and stashes jars that declare a different
+  Minecraft version in `mods.disabled` (they are moved back automatically when you launch their version).
+* **Fast mods OFF** = hands off. Nothing is moved, nothing is added, nothing is deleted. The version
+  still launches through Fabric so your own mods load. Use this on your own PC.
 
 ## Limits (read this)
 

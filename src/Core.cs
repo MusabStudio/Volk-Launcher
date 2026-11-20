@@ -58,13 +58,13 @@ namespace Volk
         public string VersionId = "1.8.9";
         public string GameDir = Paths.DefaultGameDir;
         public string JavaPath = "";
-        public int RamMb = 1536;
-        public int PresetLevel = 1; // 0 off, 1 smooth (4 chunks), 2 potato (2 chunks)
+        public int RamMb = -1;   // -1 = auto (half of installed RAM, capped)
+        public int PresetLevel = -1; // -1 = auto, 0 off, 1 smooth, 2 potato
         public bool DownloadSounds = false;
         public string HorizonPath = "";
         public bool FastMods = true;
-        public int Width = 854;
-        public int Height = 480;
+        public int Width = 0;    // 0 = auto
+        public int Height = 0;   // 0 = auto
 
         public static Settings Load()
         {
@@ -99,6 +99,15 @@ namespace Volk
             }
             catch (Exception ex) { Log.Write("Settings.Load: " + ex.Message); }
             if (string.IsNullOrEmpty(s.GameDir)) s.GameDir = Paths.DefaultGameDir;
+
+            // Auto defaults: a 4 GB laptop must not get a 32 GB desktop's settings, and vice versa.
+            if (s.RamMb <= 0) s.RamMb = SysInfo.RecommendedRam();
+            if (s.PresetLevel < 0) s.PresetLevel = SysInfo.TotalRamMb >= 8192 ? 1 : 2;
+            if (s.Width <= 0 || s.Height <= 0)
+            {
+                if (SysInfo.TotalRamMb >= 8192) { s.Width = 1280; s.Height = 720; }
+                else { s.Width = 640; s.Height = 360; }
+            }
             return s;
         }
 
@@ -695,4 +704,5 @@ namespace Volk
         }
     }
 }
+
 
